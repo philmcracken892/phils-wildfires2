@@ -1,0 +1,19 @@
+['fireman'] = {
+        {
+            id = 'fireman',
+            title = 'extinguish',
+            icon = 'exclamation',
+            type = 'command',
+            event = 'spawnhydrant',
+            shouldClose = true
+        },
+		{
+            id = 'fireman',
+            title = 'listfires',
+            icon = 'exclamation',
+            type = 'command',
+            event = 'listfires',
+            shouldClose = true
+        },
+		
+    },

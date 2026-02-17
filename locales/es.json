@@ -1,0 +1,16 @@
+{
+"print_cl_started": "^2[FireSystem] Se recibió el evento fire:startFire^7",
+"not_cl_1": "Sistema de fuego",
+"not_cl_2": "¡Demasiados incendios activos!",
+"not_cl_3": "¡Incendio iniciado correctamente!",
+"not_cl_4": "¡Error al iniciar el incendio!",
+"not_cl_5": "¡Extinción de incendio completada! Área despejada.",
+
+"print_sv_started": "^1[FireSystem] No se encontró el reproductor para la fuente",
+"print_sv_ply": "^2[FireSystem] Reproductor",
+"print_sv_ply2": "Fósforos usados^7",
+"not_sv_1": "Sistema de fuego",
+"not_sv_2": "¡Necesitas cerillas para iniciar un incendio!",
+"not_sv_3": "¡Necesitas un cubo de agua para apagar un incendio!"
+
+}

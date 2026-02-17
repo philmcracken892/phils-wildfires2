@@ -1,0 +1,1 @@
+hydrant = { name = 'hydrant', label = 'hydrant', weight = 120, type = 'item', image = 'hydrant.png', unique = false, useable = true, shouldClose = true, description = 'firehydrant' },

@@ -1,0 +1,16 @@
+{
+    "print_cl_started": "^2[FireSystem] Received fire:startFire event^7",
+    "not_cl_1": "Fire System",
+    "not_cl_2": "You have reached the maximum number of active fires!",
+    "not_cl_3": "Fire started successfully!",
+    "not_cl_4": "Failed to start fire!",
+    "not_cl_5": "Fire suppression completed! Area cleared.",
+    "not_cl_random_fire": "Wildfire reported near %s!",
+    "print_sv_started": "^1[FireSystem] Player not found for source",
+    "print_sv_ply": "^2[FireSystem] Player",
+    "print_sv_ply2": "used matches^7",
+    "not_sv_1": "Fire System",
+    "not_sv_2": "You need matches to start a fire!",
+    "not_sv_3": "You need a water bucket to extinguish a fire!",
+    "print_sv_random_fire": "^2[FireSystem] Random fire started at coordinates^7"
+}
