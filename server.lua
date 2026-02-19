@@ -96,7 +96,7 @@ local function GetOnlineFirefightersText()
     
     local text = ""
     for i, ff in ipairs(firefighters) do
-        text = text .. "• " .. ff.name .. " (" .. ff.grade .. ")"
+        text = text .. "â€¢ " .. ff.name .. " (" .. ff.grade .. ")"
         if i < #firefighters then
             text = text .. "\n"
         end
@@ -707,28 +707,7 @@ RSGCore.Functions.CreateCallback('fire:getOnlineFirefighters', function(source, 
     cb(firefighters)
 end)
 
--- =============================================
--- ITEM HANDLING - WATER
--- =============================================
-RSGCore.Functions.CreateUseableItem(Config.WaterItem, function(source, item)
-    local src = source
-    local Player = RSGCore.Functions.GetPlayer(src)
 
-    if not Player then return end
-
-    local hasItem = Player.Functions.GetItemByName(Config.WaterItem)
-    if not hasItem or hasItem.amount < Config.WaterAmount then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = '? Error',
-            description = 'You need water to extinguish fires.',
-            type = 'error',
-            duration = 3000
-        })
-        return
-    end
-
-    TriggerClientEvent('fire:tryExtinguish', src)
-end)
 
 -- =============================================
 -- ITEM HANDLING - HYDRANT
