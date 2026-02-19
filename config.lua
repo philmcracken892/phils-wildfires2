@@ -6,7 +6,7 @@ Config = {}
 Config.FireDuration = 1200000 -- 20 minutes (in milliseconds)
 Config.MaxFireIntensity = 10
 Config.MaxFires = 50
-Config.ExtinguishDistance = 4.0
+Config.ExtinguishDistance = 20.0
 Config.FirePlaceDistance = 2.0
 
 -- =============================================
@@ -80,9 +80,9 @@ Config.FireSpawnLocations = {
 -- ITEM SETTINGS
 -- =============================================
 Config.ConsumeMatches = true
-Config.ConsumeWater = true
+Config.ConsumeWater = false
 Config.MatchesItem = 'matches'
-Config.WaterItem = 'water'
+Config.WaterItem = 'hydrantwater'
 Config.WaterAmount = 1
 
 -- =============================================
@@ -99,14 +99,14 @@ Config.CrouchAnimationDuration = 1000
 Config.FireSpread = {
     Enabled = true,
     SpreadRadius = 8.0,
-    SpreadChance = 0.6,
+    SpreadChance = 1.0,
     SpreadInterval = 3000,
     IgnitionRadius = 3.0,
     MinIgnitionIntensity = 5.0,
-    GroundSpreadRadius = 6.0,
-    GroundSpreadChance = 0.5,
-    MaxTotalFires = 50,
-    MaxBurningObjects = 20
+    GroundSpreadRadius = 20.0,
+    GroundSpreadChance = 1.0,
+    MaxTotalFires = 25,
+    MaxBurningObjects = 2
 }
 
 -- =============================================
@@ -297,7 +297,7 @@ Config.PlaceableItems = {
             offset = vector3(0.0, 0.0, 0.2),
             duration = 5000,
             interval = 500,
-            radius = 25.0
+            radius = 35.0
         },
         label = 'Fire Hydrant',
         interactDistance = 5.0,
@@ -321,7 +321,7 @@ Config.FireVehicles = {
             offset = vector3(0.0, 0.0, 0.8), -- LEFT and DOWN
             duration = 8000,
             interval = 500,
-            radius = 25.0
+            radius = 35.0
         },
         animation = {
             dict = 'script_re@gold_panner@gold_success',
