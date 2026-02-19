@@ -25,6 +25,7 @@ local trackedVehicles = {}
 
 -- Notification cooldowns
 local lastHydrantNotification = 0
+
 function TableCount(t)
     local count = 0
     for _ in pairs(t) do
@@ -36,6 +37,7 @@ end
 function GetPlayerFireCount()
     return TableCount(activeFires)
 end
+
 -- =============================================
 -- INITIALIZE
 -- =============================================
@@ -55,14 +57,6 @@ local function Debug(message)
     end
 end
 
-function TableCount(t)
-    local count = 0
-    for _ in pairs(t) do
-        count = count + 1
-    end
-    return count
-end
-
 local function GenerateFireId()
     fireId = fireId + 1
     return fireId
@@ -74,6 +68,80 @@ local function GetDistanceText(distance)
     else
         return string.format("%.1fkm", distance / 1000)
     end
+end
+
+-- =============================================
+-- WATER SAFETY - PREVENT ALL DAMAGE
+-- =============================================
+local function ProtectAllEntitiesInArea(coords, radius, duration)
+    local protectedEntities = {}
+    
+    -- Protect all nearby peds (NPCs and players)
+    local nearbyPeds = GetNearbyPeds(coords, radius, 30)
+    for _, ped in ipairs(nearbyPeds) do
+        if DoesEntityExist(ped) then
+            SetEntityInvincible(ped, true)
+            SetEntityProofs(ped, true, true, true, true, true, true, true, true)
+            table.insert(protectedEntities, {entity = ped, type = 'ped'})
+        end
+    end
+    
+    -- Protect player
+    local playerPed = PlayerPedId()
+    SetEntityInvincible(playerPed, true)
+    SetEntityProofs(playerPed, true, true, true, true, true, true, true, true)
+    table.insert(protectedEntities, {entity = playerPed, type = 'player'})
+    
+    -- Protect all nearby vehicles (wagons, horses, carts)
+    local nearbyVehicles = GetNearbyVehicles(coords, radius, 20)
+    for _, veh in ipairs(nearbyVehicles) do
+        if DoesEntityExist(veh) then
+            SetEntityInvincible(veh, true)
+            SetEntityProofs(veh, true, true, true, true, true, true, true, true)
+            SetEntityCanBeDamaged(veh, false)
+            table.insert(protectedEntities, {entity = veh, type = 'vehicle'})
+        end
+    end
+    
+    -- Protect nearby objects
+    local handle, object = FindFirstObject()
+    local success = true
+    repeat
+        if DoesEntityExist(object) then
+            local objCoords = GetEntityCoords(object)
+            if #(coords - objCoords) <= radius then
+                SetEntityInvincible(object, true)
+                SetEntityCanBeDamaged(object, false)
+                table.insert(protectedEntities, {entity = object, type = 'object'})
+            end
+        end
+        success, object = FindNextObject(handle)
+    until not success
+    EndFindObject(handle)
+    
+    -- Remove protection after duration
+    SetTimeout(duration, function()
+        for _, data in ipairs(protectedEntities) do
+            if DoesEntityExist(data.entity) then
+                if data.type == 'player' then
+                    SetEntityInvincible(data.entity, false)
+                    SetEntityProofs(data.entity, false, false, false, false, false, false, false, false)
+                elseif data.type == 'ped' then
+                    SetEntityInvincible(data.entity, false)
+                    SetEntityProofs(data.entity, false, false, false, false, false, false, false, false)
+                elseif data.type == 'vehicle' then
+                    SetEntityInvincible(data.entity, false)
+                    SetEntityProofs(data.entity, false, false, false, false, false, false, false, false)
+                    SetEntityCanBeDamaged(data.entity, true)
+                elseif data.type == 'object' then
+                    SetEntityInvincible(data.entity, false)
+                    SetEntityCanBeDamaged(data.entity, true)
+                end
+            end
+        end
+    end)
+    
+    return protectedEntities
 end
 
 -- =============================================
@@ -144,43 +212,32 @@ end
 local function CreateFireBlip(coords, area, blipFireId)
     if not Config.AddGPSRoute then return nil end
     
-    -- Check if blip already exists for this fire
     for _, entry in ipairs(blipEntries) do
         if entry.fireId == blipFireId then
             return entry
         end
     end
     
-    -- Create blip using BlipAddForCoords
     local blip = Citizen.InvokeNative(0x554D9D53F696D002, 1664425300, coords.x, coords.y, coords.z)
     
     if not blip or blip == 0 then
-        -- Try alternative method
         blip = Citizen.InvokeNative(0x554D9D53F696D002, joaat("BLIP_STYLE_ENEMY"), coords.x, coords.y, coords.z)
     end
     
     if blip and blip ~= 0 then
-        -- Set blip sprite
         Citizen.InvokeNative(0x74F74D3207ED525C, blip, Config.BlipSprite or 1754365229, true)
-        
-        -- Set blip scale
         Citizen.InvokeNative(0xD38744167B2FA257, blip, Config.BlipScale or 0.9)
+        Citizen.InvokeNative(0x0D6375FF1491DC27, blip, "BLIP_MODIFIER_MP_COLOR_32")
         
-        -- Set blip color to red
-        Citizen.InvokeNative(0x0D6375FF1491DC27, blip, "BLIP_MODIFIER_MP_COLOR_32") -- Red color
-        
-        -- Set blip name
         local blipName = area or "FIRE"
         local varString = CreateVarString(10, "LITERAL_STRING", blipName)
         Citizen.InvokeNative(0x9CB1A1623062F402, blip, varString)
         
-        -- Make blip flash if enabled
         if Config.BlipFlash then
             Citizen.InvokeNative(0xAA662B71D36A809E, blip, true)
         end
         
-        -- Set blip to show on map
-        Citizen.InvokeNative(0x662D364ABF16DE2F, blip, 2) -- BLIP_ADD_MODIFIER
+        Citizen.InvokeNative(0x662D364ABF16DE2F, blip, 2)
         
         local blipEntry = {
             handle = blip,
@@ -199,16 +256,14 @@ local function CreateFireBlip(coords, area, blipFireId)
 end
 
 -- =============================================
--- REMOVE FIRE BLIP (FIXED FOR REDM)
+-- REMOVE FIRE BLIP
 -- =============================================
 local function RemoveFireBlip(blipFireId)
     for i = #blipEntries, 1, -1 do
         local blipEntry = blipEntries[i]
         if blipEntry.fireId == blipFireId then
             if blipEntry.handle then
-                -- Stop flash
                 Citizen.InvokeNative(0xAA662B71D36A809E, blipEntry.handle, false)
-                -- Remove blip
                 RemoveBlip(blipEntry.handle)
             end
             table.remove(blipEntries, i)
@@ -218,9 +273,6 @@ local function RemoveFireBlip(blipFireId)
     return false
 end
 
--- =============================================
--- REMOVE BLIP BY COORDINATES
--- =============================================
 local function RemoveFireBlipByCoords(coords, radius)
     radius = radius or 50.0
     local coordsVec = vector3(coords.x, coords.y, coords.z)
@@ -241,9 +293,6 @@ local function RemoveFireBlipByCoords(coords, radius)
     return removed
 end
 
--- =============================================
--- REMOVE ALL FIRE BLIPS
--- =============================================
 local function RemoveAllFireBlips()
     for i = #blipEntries, 1, -1 do
         local blipEntry = blipEntries[i]
@@ -305,7 +354,7 @@ local function ApplyScreenEffect(distance)
     if distance < 20.0 then
         ShakeGameplayCam('SMALL_EXPLOSION_SHAKE', 0.5)
     elseif distance < 50.0 then
-        ShakeGameplayCam('SMALL_EXPLOSION_SHAKE', 0.2)
+        ShakeGameplayCam('SMALL_EXPLOSION_SHAKE', 0.3)
     end
 end
 
@@ -569,7 +618,7 @@ local function CheckObjectsNearFire(fireCoords, fireIntensity)
                 
                 local foundGround, groundZ = GetGroundZFor_3dCoord(newFireCoords.x, newFireCoords.y, newFireCoords.z + 1.0, false)
                 if foundGround then
-                    newFireCoords = vector3(newFireCoords.x, newFireCoords.y, groundZ + 0.2)
+                    newFireCoords = vector3(newFireCoords.x, newFireCoords.y, groundZ + 0.3)
                     CreateFire(newFireCoords, false, nil)
                 end
             end
@@ -578,7 +627,7 @@ local function CheckObjectsNearFire(fireCoords, fireIntensity)
 end
 
 -- =============================================
--- MAIN FIRE CREATION - BALANCED & RELIABLE
+-- MAIN FIRE CREATION
 -- =============================================
 function CreateFire(coords, notifyPlayers, serverFireId)
     if TableCount(activeFires) >= Config.FireSpread.MaxTotalFires then
@@ -592,24 +641,21 @@ function CreateFire(coords, notifyPlayers, serverFireId)
     end
     
     local foundGround, groundZ = GetGroundZFor_3dCoord(coords.x, coords.y, coords.z + 1.0, false)
-    local fireCoords = foundGround and vector3(coords.x, coords.y, groundZ + 0.2) or vector3(coords.x, coords.y, coords.z + 0.5)
+    local fireCoords = foundGround and vector3(coords.x, coords.y, groundZ + 0.3) or vector3(coords.x, coords.y, coords.z + 0.5)
     
     local fireHandles = {}
     local particleHandles = {}
     local isVfx = false
     local maxIntensity = Config.MaxFireIntensity or 15
     
-    -- Function to spawn fire points
     local function SpawnFirePoints()
         local handles = {}
         
-        -- CENTER FIRE (1)
         local mainFire = StartScriptFire(fireCoords.x, fireCoords.y, fireCoords.z, maxIntensity, false)
         if mainFire and mainFire ~= 0 then
             table.insert(handles, mainFire)
         end
         
-        -- INNER RING - 4 fires
         for i = 1, 4 do
             local angle = (360 / 4) * i
             local distance = 1.5
@@ -624,7 +670,6 @@ function CreateFire(coords, notifyPlayers, serverFireId)
             end
         end
         
-        -- OUTER RING - 6 fires
         for i = 1, 6 do
             local angle = (360 / 6) * i + 30
             local distance = 3.0
@@ -639,7 +684,6 @@ function CreateFire(coords, notifyPlayers, serverFireId)
             end
         end
         
-        -- VERTICAL - 2 layers, 2 fires each
         for layer = 1, 2 do
             local layerZ = fireCoords.z + (layer * 1.5)
             for i = 1, 2 do
@@ -659,7 +703,6 @@ function CreateFire(coords, notifyPlayers, serverFireId)
         return handles
     end
     
-    -- Function to spawn particles
     local function SpawnParticles()
         local particles = {}
         
@@ -671,7 +714,6 @@ function CreateFire(coords, notifyPlayers, serverFireId)
         end
         
         if HasNamedPtfxAssetLoaded('scr_ind1') then
-            -- 2 smoke columns
             for i = 1, 2 do
                 local smokeCoords = vector3(
                     fireCoords.x + math.random(-1, 1),
@@ -684,7 +726,6 @@ function CreateFire(coords, notifyPlayers, serverFireId)
                 end
             end
             
-            -- 3 ground flames
             for i = 1, 3 do
                 local groundCoords = vector3(
                     fireCoords.x + math.random(-2, 2),
@@ -701,7 +742,6 @@ function CreateFire(coords, notifyPlayers, serverFireId)
         return particles
     end
     
-    -- Spawn fires and particles
     fireHandles = SpawnFirePoints()
     particleHandles = SpawnParticles()
     
@@ -730,9 +770,8 @@ function CreateFire(coords, notifyPlayers, serverFireId)
     
     CheckObjectsNearFire(fireCoords, maxIntensity)
     
-    -- FIRE MAINTENANCE THREAD
     CreateThread(function()
-        local refreshInterval = 15000 -- Refresh every 15 seconds
+        local refreshInterval = 15000
         local startTime = GetGameTimer()
         local duration = Config.FireDuration or 1200000
         
@@ -751,21 +790,18 @@ function CreateFire(coords, notifyPlayers, serverFireId)
             
             local fireData = activeFires[currentFireId]
             if fireData then
-                -- Remove old fires
                 for _, handle in ipairs(fireData.fireHandles) do
                     if handle and handle ~= 0 then
                         RemoveScriptFire(handle)
                     end
                 end
                 
-                -- Respawn fires
                 local newHandles = SpawnFirePoints()
                 activeFires[currentFireId].fireHandles = newHandles
             end
         end
     end)
     
-    -- Fire spread
     if Config.FireSpread.Enabled then
         SetTimeout(Config.FireSpread.SpreadInterval, function()
             local function spreadTimer()
@@ -780,8 +816,6 @@ function CreateFire(coords, notifyPlayers, serverFireId)
     
     return currentFireId
 end
-
-
 
 -- =============================================
 -- FIRE EXTINGUISHING
@@ -808,10 +842,8 @@ function ExtinguishFire(fireIdToExtinguish, notifyServer)
     
     local fireData = activeFires[fireIdToExtinguish]
     
-    -- Mark as inactive to stop maintenance thread
     fireData.isActive = false
     
-    -- Remove all fire handles
     if fireData.fireHandles then
         for _, fireHandle in ipairs(fireData.fireHandles) do
             if fireHandle and fireHandle ~= 0 then
@@ -824,7 +856,6 @@ function ExtinguishFire(fireIdToExtinguish, notifyServer)
         end
     end
     
-    -- Remove particle handles specifically
     if fireData.particleHandles then
         for _, particle in ipairs(fireData.particleHandles) do
             if particle and particle ~= 0 then
@@ -833,7 +864,6 @@ function ExtinguishFire(fireIdToExtinguish, notifyServer)
         end
     end
     
-    -- Also extinguish any native fires in the area
     Citizen.InvokeNative(0xDB38F247BD421708, fireData.coords.x, fireData.coords.y, fireData.coords.z, 15.0)
     
     RemoveFireBlip(fireIdToExtinguish)
@@ -1032,7 +1062,7 @@ function UseFloorItemWithAnimation(itemData)
             
             Citizen.SetTimeout(ex.timer or 15000, function()
                 if DoesEntityExist(itemData.prop) then
-                    AddExplosion(explosionCoords.x, explosionCoords.y, explosionCoords.z, ex.id, ex.damage or 2.0, true, false, 1.0)
+                    AddExplosion(explosionCoords.x, explosionCoords.y, explosionCoords.z, ex.id, ex.damage or 0.3, true, false, 0.3)
                     
                     CreateFire(explosionCoords, true, nil)
                     
@@ -1056,7 +1086,13 @@ function UseFloorItemWithAnimation(itemData)
             Citizen.CreateThread(function()
                 while GetGameTimer() - startTime < ex.duration do
                     if DoesEntityExist(itemData.prop) then
-                        AddExplosion(explosionCoords.x, explosionCoords.y, explosionCoords.z, ex.id, 1.5, true, false, 0.0)
+                        -- Protect ALL entities before water spray
+                        ProtectAllEntitiesInArea(explosionCoords, ex.radius + 10.0, ex.interval + 500)
+                        
+                        Wait(50)
+                        
+                        -- Zero damage water explosion
+                        AddExplosion(explosionCoords.x, explosionCoords.y, explosionCoords.z, ex.id, 0.5, true, false, 0.0)
                         ExtinguishFiresInRange(explosionCoords.x, explosionCoords.y, explosionCoords.z, ex.radius)
                     else
                         break
@@ -1102,15 +1138,15 @@ local HoseConfig = {
     extinguishRadius = 10.0,
     sprayInterval = 300,
     startDistance = 3.0,
-    maxCartDistance = 30.0,
+    maxCartDistance = 60.0,
     cartOffsetX = 0.0,
     cartOffsetY = 0.0,
     cartOffsetZ = 0.8,
-    hoseThickness = 15,
-    hoseSpread = 0.02,
-    hoseColorR = 139,
-    hoseColorG = 0,
-    hoseColorB = 0,
+    hoseThickness = 150,
+    hoseSpread = 0.01,
+    hoseColorR = 128,
+    hoseColorG = 128,
+    hoseColorB = 128,
     hoseAlpha = 255,
     hoseSag = 0.8,
 }
@@ -1236,20 +1272,27 @@ local function SprayWater()
     local playerZ = playerCoords.z
     local spreadWidth = 0.8
     
+    -- ALLOW WALKING BUT NO RUNNING (0.0 = frozen, 1.0 = full speed, 0.15 = slow walk)
+    SetPedMaxMoveBlendRatio(playerPed, 0.15)
+    
+    -- Protect ALL entities BEFORE spraying water
+    ProtectAllEntitiesInArea(playerCoords, HoseConfig.extinguishRange + 10.0, 2000)
+    
     for sprayDist = HoseConfig.startDistance, HoseConfig.extinguishRange, 2.5 do
         local centerX = playerCoords.x + forwardX * sprayDist
         local centerY = playerCoords.y + forwardY * sprayDist
-        local groundZ = GetGroundZ(centerX, centerY, playerZ) + 0.15
+        local groundZ = GetGroundZ(centerX, centerY, playerZ) + 0.35
         
         local leftX = centerX - rightX * spreadWidth
         local leftY = centerY - rightY * spreadWidth
-        AddExplosion(leftX, leftY, GetGroundZ(leftX, leftY, playerZ) + 0.15, HoseConfig.waterExplosionType, 1.5, true, false, 0.0)
         
-        AddExplosion(centerX, centerY, groundZ, HoseConfig.waterExplosionType, 1.5, true, false, 0.0)
+        -- Keep damage at 0.3 for visual effect - entities are protected
+        AddExplosion(leftX, leftY, GetGroundZ(leftX, leftY, playerZ) + 0.35, HoseConfig.waterExplosionType, 0.2, true, false, 0.0)
+        AddExplosion(centerX, centerY, groundZ, HoseConfig.waterExplosionType, 0.3, true, false, 0.0)
         
         local rightPosX = centerX + rightX * spreadWidth
         local rightPosY = centerY + rightY * spreadWidth
-        AddExplosion(rightPosX, rightPosY, GetGroundZ(rightPosX, rightPosY, playerZ) + 0.15, HoseConfig.waterExplosionType, 1.5, true, false, 0.0)
+        AddExplosion(rightPosX, rightPosY, GetGroundZ(rightPosX, rightPosY, playerZ) + 0.35, HoseConfig.waterExplosionType, 0.2, true, false, 0.0)
         
         ExtinguishFiresInRange(centerX, centerY, groundZ, HoseConfig.extinguishRadius)
         Citizen.InvokeNative(0xDB38F247BD421708, centerX, centerY, groundZ, HoseConfig.extinguishRadius)
@@ -1299,6 +1342,7 @@ local function StartHose()
         duration = 4000
     })
     
+    -- Draw hose from cart to player
     CreateThread(function()
         while isHoseActive do
             if attachedCart and DoesEntityExist(attachedCart) then
@@ -1308,6 +1352,28 @@ local function StartHose()
         end
     end)
     
+    -- =============================================
+    -- ADD THIS THREAD HERE - Walk only, no running
+    -- =============================================
+    CreateThread(function()
+        while isHoseActive do
+            local playerPed = PlayerPedId()
+            
+            -- Only allow walking speed
+            SetPedMaxMoveBlendRatio(playerPed, 0.2)
+            
+            -- Disable sprint button
+            DisableControlAction(0, 0x8FFC75D6, true)
+            
+            Wait(0)
+        end
+        
+        -- Reset to full speed when hose stops
+        SetPedMaxMoveBlendRatio(PlayerPedId(), 1.0)
+    end)
+    -- =============================================
+    
+    -- Main spray thread
     hoseThread = CreateThread(function()
         local lastSpray = 0
         
@@ -1358,7 +1424,13 @@ StopHose = function()
     cachedPlayerPed = nil
     cachedHandBoneIndex = nil
     
-    SetEntityInvincible(PlayerPedId(), false)
+    local playerPed = PlayerPedId()
+    
+    -- Reset to full movement speed
+    SetPedMaxMoveBlendRatio(playerPed, 1.0)
+    
+    -- Remove invincibility
+    SetEntityInvincible(playerPed, false)
     
     TriggerServerEvent('hose:server:stopHose')
     
@@ -1431,29 +1503,6 @@ RegisterCommand('hose', function()
     ToggleHose()
 end, false)
 
-AddEventHandler('onResourceStop', function(resource)
-    if resource == GetCurrentResourceName() then
-        if isHoseActive then
-            StopHose()
-        end
-        syncedHoses = {}
-    end
-end)
-
-exports('toggleHose', ToggleHose)
-exports('startHose', StartHose)
-exports('stopHose', StopHose)
-exports('isHoseActive', function() return isHoseActive end)
-
-AddEventHandler('playerSpawned', function()
-    TriggerServerEvent('hose:server:requestSync')
-end)
-
-CreateThread(function()
-    Wait(2000)
-    TriggerServerEvent('hose:server:requestSync')
-end)
-
 -- =============================================
 -- FIRE CART SYSTEM
 -- =============================================
@@ -1466,7 +1515,14 @@ local function TriggerVehicleWaterSpray(vehicle, waterConfig)
         while GetGameTimer() - startTime < waterConfig.duration do
             if DoesEntityExist(vehicle) then
                 local sprayCoords = GetOffsetFromEntityInWorldCoords(vehicle, waterConfig.offset.x, waterConfig.offset.y, waterConfig.offset.z)
-                AddExplosion(sprayCoords.x, sprayCoords.y, sprayCoords.z, waterConfig.id, 1.5, true, false, 0.0)
+                
+                -- Protect ALL entities
+                ProtectAllEntitiesInArea(sprayCoords, waterConfig.radius + 10.0, waterConfig.interval + 500)
+                
+                Wait(50)
+                
+                -- Zero damage explosion
+                AddExplosion(sprayCoords.x, sprayCoords.y, sprayCoords.z, waterConfig.id, 0.3, true, false, 0.0)
                 ExtinguishFiresInRange(sprayCoords.x, sprayCoords.y, sprayCoords.z, waterConfig.radius)
             else
                 break
@@ -1640,18 +1696,14 @@ RegisterNetEvent('fire:client:objectFireNotification', function(data)
 end)
 
 RegisterNetEvent('fire:client:fireExtinguishedNotification', function(data)
-    -- Remove fire from local tracking
     if data.fireId then
-        -- Try direct ID match first
         if activeFires[data.fireId] then
             local fireData = activeFires[data.fireId]
             
-            -- Mark as inactive
             if fireData.isActive ~= nil then
                 fireData.isActive = false
             end
             
-            -- Remove fire handles
             if fireData.fireHandles then
                 for _, fireHandle in ipairs(fireData.fireHandles) do
                     if fireHandle and fireHandle ~= 0 then
@@ -1665,7 +1717,6 @@ RegisterNetEvent('fire:client:fireExtinguishedNotification', function(data)
                 end
             end
             
-            -- Remove particle handles
             if fireData.particleHandles then
                 for _, particle in ipairs(fireData.particleHandles) do
                     if particle and particle ~= 0 then
@@ -1674,7 +1725,6 @@ RegisterNetEvent('fire:client:fireExtinguishedNotification', function(data)
                 end
             end
             
-            -- Extinguish native fires in area
             if fireData.coords then
                 Citizen.InvokeNative(0xDB38F247BD421708, fireData.coords.x, fireData.coords.y, fireData.coords.z, 15.0)
             end
@@ -1682,18 +1732,14 @@ RegisterNetEvent('fire:client:fireExtinguishedNotification', function(data)
             activeFires[data.fireId] = nil
         end
         
-        -- Remove blip by ID
         RemoveFireBlip(data.fireId)
     end
     
-    -- Also try to find and remove by coordinates
     if data.coords then
         local coordsVec = vector3(data.coords.x, data.coords.y, data.coords.z)
         
-        -- Remove any fires near these coordinates
         for fireIdToCheck, fireData in pairs(activeFires) do
             if fireData.coords and #(coordsVec - fireData.coords) < 50.0 then
-                -- Mark as inactive
                 if fireData.isActive ~= nil then
                     fireData.isActive = false
                 end
@@ -1724,14 +1770,10 @@ RegisterNetEvent('fire:client:fireExtinguishedNotification', function(data)
             end
         end
         
-        -- Remove blips by coordinates
         RemoveFireBlipByCoords(data.coords, 50.0)
-        
-        -- Extinguish native fires in area
         Citizen.InvokeNative(0xDB38F247BD421708, data.coords.x, data.coords.y, data.coords.z, 20.0)
     end
     
-    -- Clear GPS if this was the target
     if gpsActive and data.coords then
         local coordsVec = vector3(data.coords.x, data.coords.y, data.coords.z)
         if currentGPSFire and #(coordsVec - currentGPSFire) < 50.0 then
@@ -1739,7 +1781,6 @@ RegisterNetEvent('fire:client:fireExtinguishedNotification', function(data)
         end
     end
     
-    -- Show notification
     if data.extinguisherName then
         lib.notify({
             title = 'Fire Extinguished',
@@ -1804,7 +1845,6 @@ RegisterNetEvent('fire:client:fireAlert', function(coords, area, alertFireId)
         SetFireWaypoint(coords, "Fire at " .. (area or "Unknown"))
     end
     
-    -- Pass the server fire ID to CreateFire for proper sync
     local createdFireId = CreateFire(coords, false, alertFireId)
     
     TriggerEvent('ox_lib:notify', {
@@ -1996,12 +2036,9 @@ RegisterNetEvent('fire:admin:spawnEquipment', function(itemName)
 end)
 
 RegisterNetEvent('fire:client:extinguishAll', function()
-    -- Clear GPS
     ClearFireWaypoint()
     
-    -- Extinguish all active fires
     for fireIdToExtinguish, fireData in pairs(activeFires) do
-        -- Mark as inactive
         if fireData.isActive ~= nil then
             fireData.isActive = false
         end
@@ -2026,13 +2063,11 @@ RegisterNetEvent('fire:client:extinguishAll', function()
             end
         end
         
-        -- Extinguish native fires
         if fireData.coords then
             Citizen.InvokeNative(0xDB38F247BD421708, fireData.coords.x, fireData.coords.y, fireData.coords.z, 20.0)
         end
     end
     
-    -- Remove all burning objects
     for object, objectData in pairs(burningObjects) do
         for _, fireHandle in ipairs(objectData.fireHandles) do
             if objectData.isVfx then
@@ -2043,10 +2078,8 @@ RegisterNetEvent('fire:client:extinguishAll', function()
         end
     end
     
-    -- Remove ALL blips
     RemoveAllFireBlips()
     
-    -- Clear tables
     activeFires = {}
     burningObjects = {}
     
@@ -2152,14 +2185,22 @@ exports('placeItem', function(itemName)
     PlaceItemOnGround(itemName)
 end)
 
+exports('toggleHose', ToggleHose)
+exports('startHose', StartHose)
+exports('stopHose', StopHose)
+exports('isHoseActive', function() return isHoseActive end)
+
 -- =============================================
--- CLEANUP
+-- EVENT HANDLERS
 -- =============================================
 AddEventHandler('onResourceStop', function(resource)
     if resource == GetCurrentResourceName() then
+        if isHoseActive then
+            StopHose()
+        end
+        
         ClearFireWaypoint()
         
-        -- Clean up fires
         for fireIdToClean, fireData in pairs(activeFires) do
             if fireData.isActive ~= nil then
                 fireData.isActive = false
@@ -2186,7 +2227,6 @@ AddEventHandler('onResourceStop', function(resource)
             end
         end
         
-        -- Clean up burning objects
         for object, objectData in pairs(burningObjects) do
             for _, fireHandle in ipairs(objectData.fireHandles) do
                 if objectData.isVfx then
@@ -2197,10 +2237,8 @@ AddEventHandler('onResourceStop', function(resource)
             end
         end
         
-        -- Remove ALL blips properly
         RemoveAllFireBlips()
         
-        -- Clean up placed items
         for _, item in ipairs(placedItems) do
             if DoesEntityExist(item.prop) then
                 exports['ox_target']:removeLocalEntity(item.prop)
@@ -2208,18 +2246,26 @@ AddEventHandler('onResourceStop', function(resource)
             end
         end
         
-        -- Clean up tracked vehicles
         for vehicle, _ in pairs(trackedVehicles) do
             if DoesEntityExist(vehicle) then
                 exports['ox_target']:removeLocalEntity(vehicle)
             end
         end
         
-        -- Clear all tables
         activeFires = {}
         burningObjects = {}
         blipEntries = {}
         placedItems = {}
         trackedVehicles = {}
+        syncedHoses = {}
     end
+end)
+
+AddEventHandler('playerSpawned', function()
+    TriggerServerEvent('hose:server:requestSync')
+end)
+
+CreateThread(function()
+    Wait(2000)
+    TriggerServerEvent('hose:server:requestSync')
 end)
